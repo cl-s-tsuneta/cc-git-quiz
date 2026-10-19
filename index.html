@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CC &amp; Git コマンドクイズ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* デザイントークン。ダークモードは OS 設定に追従する */
+    :root {
+      --bg: #f6f7f9; --surface: #ffffff; --ink: #1c1f26; --muted: #5d6573; --line: #d9dde4;
+      --accent: #2f5fd0; --accent-ink: #ffffff;
+      --ok: #16794a; --ok-bg: #e4f5ec; --ng: #b3261e; --ng-bg: #fbe9e7;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14161a; --surface: #1d2026; --ink: #eceef2; --muted: #a0a7b4; --line: #343944;
+        --accent: #7aa2ff; --accent-ink: #10141c;
+        --ok: #5fd39a; --ok-bg: #16301f; --ng: #ff8f86; --ng-bg: #3a1c1a;
+      }
+    }
+    body { background: var(--bg); color: var(--ink); }
+  </style>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: 'var(--bg)', surface: 'var(--surface)', ink: 'var(--ink)', muted: 'var(--muted)',
+            line: 'var(--line)', accent: 'var(--accent)', 'accent-ink': 'var(--accent-ink)',
+            ok: 'var(--ok)', 'ok-bg': 'var(--ok-bg)', ng: 'var(--ng)', 'ng-bg': 'var(--ng-bg)',
+          },
+        },
+      },
+    };
+  </script>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto w-full max-w-2xl px-4 py-8">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold">CC &amp; Git コマンドクイズ</h1>
+      <p class="mt-1 text-sm text-muted">Claude Code と Git / GitHub CLI のコマンドを 4 択で覚えよう。</p>
+    </header>
+    <div id="app" aria-live="polite"></div>
+  </main>
+
+  <script src="questions.js"></script>
+  <script>
+    const ROUND_SIZE = 10;
+    const ALL = '__all__';
+    const app = document.getElementById('app');
+    let state = null;
+
+    // 小さな DOM ヘルパー。本文は textContent で入れる（innerHTML は使わない）
+    function h(tag, attrs = {}, ...children) {
+      const el = document.createElement(tag);
+      for (const [k, v] of Object.entries(attrs)) {
+        if (k === 'class') el.className = v;
+        else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+        else el.setAttribute(k, v);
+      }
+      for (const c of children.flat()) {
+        if (c == null) continue;
+        el.append(c.nodeType ? c : document.createTextNode(c));
+      }
+      return el;
+    }
+    function render(...nodes) { app.replaceChildren(...nodes); }
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    const btnPrimary = 'rounded-lg bg-accent px-5 py-3 font-semibold text-accent-ink hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+    const btnGhost = 'rounded-lg border border-line bg-surface px-5 py-3 font-semibold hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent';
+
+    // ---- スタート（カテゴリ選択） ----
+    function showStart() {
+      state = null;
+      const cards = [{ key: ALL, label: 'すべて', count: QUESTIONS.length }]
+        .concat(CATEGORIES.map(c => ({ key: c, label: c, count: QUESTIONS.filter(q => q.category === c).length })));
+      render(
+        h('h2', { class: 'mb-3 text-lg font-semibold' }, 'カテゴリを選んでください'),
+        h('ul', { class: 'grid gap-3 sm:grid-cols-2' }, cards.map(c =>
+          h('li', {},
+            h('button', {
+              type: 'button',
+              class: 'w-full rounded-xl border border-line bg-surface p-4 text-left hover:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+              onclick: () => startQuiz(c.key),
+            },
+              h('span', { class: 'block font-semibold' }, c.label),
+              h('span', { class: 'mt-1 block text-sm text-muted' },
+                `${c.count} 問中 ${Math.min(ROUND_SIZE, c.count)} 問を出題`)))
+        )),
+        h('p', { class: 'mt-6 text-xs text-muted' }, '出題順と選択肢の並びは毎回ランダムです。')
+      );
+    }
+
+    // ---- 出題 ----
+    function startQuiz(key) {
+      const pool = key === ALL ? QUESTIONS : QUESTIONS.filter(q => q.category === key);
+      const list = shuffle(pool).slice(0, ROUND_SIZE).map(q => ({
+        ...q,
+        options: shuffle(q.choices.map((text, i) => ({ text, correct: i === q.answer }))),
+      }));
+      state = { key, list, i: 0, score: 0, picked: null, wrong: [] };
+      showQuestion();
+    }
+
+    function showQuestion() {
+      const q = state.list[state.i];
+      const answered = state.picked !== null;
+      const total = state.list.length;
+
+      const options = q.options.map((opt, idx) => {
+        let cls = 'flex w-full items-start gap-3 rounded-xl border p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ';
+        let mark = '';
+        if (!answered) {
+          cls += 'border-line bg-surface hover:border-accent';
+        } else if (opt.correct) {
+          cls += 'border-ok bg-ok-bg'; mark = '✓ 正解';
+        } else if (idx === state.picked) {
+          cls += 'border-ng bg-ng-bg'; mark = '✗ あなたの回答';
+        } else {
+          cls += 'border-line bg-surface opacity-70';
+        }
+        return h('li', {},
+          h('button', {
+            type: 'button', class: cls, ...(answered ? { disabled: '' } : {}),
+            'data-idx': String(idx), onclick: () => answer(idx),
+          },
+            h('span', { class: 'font-mono text-sm text-muted' }, String(idx + 1)),
+            h('span', { class: 'flex-1 break-words font-mono text-sm' }, opt.text),
+            mark ? h('span', { class: 'shrink-0 text-xs font-semibold' }, mark) : null));
+      });
+
+      const feedback = answered ? h('section', {
+        class: 'mt-4 rounded-xl border p-4 ' + (state.picked != null && q.options[state.picked].correct ? 'border-ok bg-ok-bg' : 'border-ng bg-ng-bg'),
+      },
+        h('p', { class: 'font-bold' }, q.options[state.picked].correct ? '正解！' : '不正解'),
+        h('p', { class: 'mt-1 text-sm leading-relaxed' }, q.explanation)) : null;
+
+      const next = answered ? h('button', {
+        type: 'button', id: 'next', class: btnPrimary + ' mt-4',
+        onclick: () => { state.i++; state.picked = null; state.i < total ? showQuestion() : showResult(); },
+      }, state.i + 1 < total ? '次の問題へ' : '結果を見る') : null;
+
+      render(
+        h('div', { class: 'mb-3 flex items-center justify-between text-sm text-muted' },
+          h('span', {}, `${state.i + 1} / ${total}`),
+          h('span', {}, q.category)),
+        h('div', { class: 'mb-4 h-2 overflow-hidden rounded-full bg-line', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(state.i + (answered ? 1 : 0)) },
+          h('div', { class: 'h-full bg-accent', style: `width:${((state.i + (answered ? 1 : 0)) / total) * 100}%` })),
+        h('h2', { class: 'mb-4 text-lg font-semibold leading-snug' }, q.question),
+        h('ul', { class: 'grid gap-3' }, options),
+        feedback, next,
+        h('p', { class: 'mt-6 text-xs text-muted' }, answered ? 'Enter で次へ進めます。' : 'キーボードの 1〜4 でも回答できます。')
+      );
+      if (answered) document.getElementById('next').focus();
+    }
+
+    function answer(idx) {
+      if (state.picked !== null) return;
+      const q = state.list[state.i];
+      state.picked = idx;
+      if (q.options[idx].correct) state.score++;
+      else state.wrong.push({ q, picked: idx });
+      showQuestion();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (!state || state.picked !== null || e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = Number(e.key);
+      if (n >= 1 && n <= 4 && state.list[state.i] && state.list[state.i].options[n - 1]) answer(n - 1);
+    });
+
+    // ---- 結果 ----
+    function showResult() {
+      const total = state.list.length;
+      const pct = Math.round((state.score / total) * 100);
+      const comment = pct === 100 ? '全問正解！完璧です。'
+        : pct >= 80 ? 'すばらしい！あと一歩で満点です。'
+        : pct >= 50 ? 'いい調子です。間違えた問題を復習しましょう。'
+        : 'まずは解説を読んで、もう一度挑戦してみましょう。';
+
+      const review = state.wrong.length === 0 ? null : h('section', { class: 'mt-8' },
+        h('h3', { class: 'mb-3 text-lg font-semibold' }, `間違えた問題（${state.wrong.length} 問）`),
+        h('ul', { class: 'grid gap-3' }, state.wrong.map(({ q, picked }) =>
+          h('li', { class: 'rounded-xl border border-line bg-surface p-4' },
+            h('p', { class: 'font-semibold' }, q.question),
+            h('p', { class: 'mt-2 text-sm' }, h('span', { class: 'text-ng font-semibold' }, 'あなたの回答: '), h('span', { class: 'font-mono' }, q.options[picked].text)),
+            h('p', { class: 'mt-1 text-sm' }, h('span', { class: 'text-ok font-semibold' }, '正解: '), h('span', { class: 'font-mono' }, q.options.find(o => o.correct).text)),
+            h('p', { class: 'mt-2 text-sm leading-relaxed text-muted' }, q.explanation)))));
+
+      render(
+        h('section', { class: 'rounded-2xl border border-line bg-surface p-6 text-center' },
+          h('p', { class: 'text-sm text-muted' }, 'スコア'),
+          h('p', { class: 'mt-1 text-5xl font-bold' }, `${state.score} / ${total}`),
+          h('p', { class: 'mt-1 text-muted' }, `正答率 ${pct}%`),
+          h('p', { class: 'mt-3 font-semibold' }, comment)),
+        h('div', { class: 'mt-4 flex flex-wrap gap-3' },
+          h('button', { type: 'button', class: btnPrimary, onclick: () => startQuiz(state.key) }, '同じカテゴリでもう一度'),
+          h('button', { type: 'button', class: btnGhost, onclick: showStart }, 'カテゴリ選択へ')),
+        review
+      );
+      window.scrollTo(0, 0);
+    }
+
+    showStart();
+  </script>
+</body>
+</html>
