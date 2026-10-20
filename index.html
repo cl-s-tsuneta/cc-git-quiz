@@ -51,6 +51,11 @@
     const app = document.getElementById('app');
     let state = null;
 
+    // null / undefined を取り除く。DOM の append / replaceChildren は null を文字列 "null"
+    // として挿入するので、DOM に渡す2つの入口（h() の子要素と render() の引数）は
+    // どちらもこの関数を通す。「何を捨てるか」の規則をここ1か所に保つ。
+    const compact = (list) => list.filter(n => n != null);
+
     // 小さな DOM ヘルパー。本文は textContent で入れる（innerHTML は使わない）
     function h(tag, attrs = {}, ...children) {
       const el = document.createElement(tag);
@@ -59,13 +64,12 @@
         else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
         else el.setAttribute(k, v);
       }
-      for (const c of children.flat()) {
-        if (c == null) continue;
+      for (const c of compact(children.flat())) {
         el.append(c.nodeType ? c : document.createTextNode(c));
       }
       return el;
     }
-    function render(...nodes) { app.replaceChildren(...nodes); }
+    function render(...nodes) { app.replaceChildren(...compact(nodes)); }
     function shuffle(arr) {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
