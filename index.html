@@ -127,6 +127,9 @@
       const q = state.list[state.i];
       const answered = state.picked !== null;
       const total = state.list.length;
+      // 新しい問題が始まるときだけ先頭へ戻す。回答直後（解説を出す再描画）は動かさない。
+      // 長い結果画面からカテゴリ・復習・もう一度を押しても、途中の位置から始まらないようにする
+      if (!answered) window.scrollTo(0, 0);
 
       const options = q.options.map((opt, idx) => {
         let cls = 'flex w-full items-start gap-3 rounded-xl border p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ';
@@ -211,9 +214,12 @@
 
       render(
         h('section', { class: 'rounded-2xl border border-line bg-surface p-6 text-center' },
-          h('p', { class: 'text-sm text-muted' }, 'スコア'),
+          h('p', { class: 'text-sm text-muted' }, state.review ? '復習の結果' : 'スコア'),
           h('p', { class: 'mt-1 text-5xl font-bold' }, `${state.score} / ${total}`),
           h('p', { class: 'mt-1 text-muted' }, `正答率 ${pct}%`),
+          state.review
+            ? h('p', { class: 'mt-1 text-xs text-muted' }, '間違えた問題だけの結果です。元のラウンドのスコアとは別です。')
+            : null,
           h('p', { class: 'mt-3 font-semibold' }, comment)),
         h('div', { class: 'mt-4 flex flex-wrap gap-3' },
           state.wrong.length > 0
