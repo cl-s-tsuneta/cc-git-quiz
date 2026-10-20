@@ -51,6 +51,11 @@
     const app = document.getElementById('app');
     let state = null;
 
+    // null / undefined を取り除く。DOM の append / replaceChildren は null を文字列 "null"
+    // として挿入するので、DOM に渡す2つの入口（h() の子要素と render() の引数）は
+    // どちらもこの関数を通す。「何を捨てるか」の規則をここ1か所に保つ。
+    const compact = (list) => list.filter(n => n != null);
+
     // 小さな DOM ヘルパー。本文は textContent で入れる（innerHTML は使わない）
     function h(tag, attrs = {}, ...children) {
       const el = document.createElement(tag);
@@ -59,13 +64,12 @@
         else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
         else el.setAttribute(k, v);
       }
-      for (const c of children.flat()) {
-        if (c == null) continue;
+      for (const c of compact(children.flat())) {
         el.append(c.nodeType ? c : document.createTextNode(c));
       }
       return el;
     }
-    function render(...nodes) { app.replaceChildren(...nodes); }
+    function render(...nodes) { app.replaceChildren(...compact(nodes)); }
     function shuffle(arr) {
       const a = [...arr];
       for (let i = a.length - 1; i > 0; i--) {
@@ -101,20 +105,31 @@
     }
 
     // ---- 出題 ----
-    function startQuiz(key) {
-      const pool = key === ALL ? QUESTIONS : QUESTIONS.filter(q => q.category === key);
-      const list = shuffle(pool).slice(0, ROUND_SIZE).map(q => ({
+    // retryQuestions を渡すと「復習モード」: その問題だけを、並びを入れ替えて出し直す
+    function startQuiz(key, retryQuestions) {
+      const review = Array.isArray(retryQuestions);
+      const pool = review ? retryQuestions
+        : key === ALL ? QUESTIONS : QUESTIONS.filter(q => q.category === key);
+      const picked = review ? shuffle(pool) : shuffle(pool).slice(0, ROUND_SIZE);
+      const list = picked.map(q => ({
         ...q,
         options: shuffle(q.choices.map((text, i) => ({ text, correct: i === q.answer }))),
       }));
-      state = { key, list, i: 0, score: 0, picked: null, wrong: [] };
+      state = { key, list, i: 0, score: 0, picked: null, wrong: [], review };
       showQuestion();
+    }
+
+    function startReview() {
+      startQuiz(state.key, state.wrong.map(w => w.q));
     }
 
     function showQuestion() {
       const q = state.list[state.i];
       const answered = state.picked !== null;
       const total = state.list.length;
+      // 新しい問題が始まるときだけ先頭へ戻す。回答直後（解説を出す再描画）は動かさない。
+      // 長い結果画面からカテゴリ・復習・もう一度を押しても、途中の位置から始まらないようにする
+      if (!answered) window.scrollTo(0, 0);
 
       const options = q.options.map((opt, idx) => {
         let cls = 'flex w-full items-start gap-3 rounded-xl border p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ';
@@ -152,7 +167,7 @@
       render(
         h('div', { class: 'mb-3 flex items-center justify-between text-sm text-muted' },
           h('span', {}, `${state.i + 1} / ${total}`),
-          h('span', {}, q.category)),
+          h('span', {}, state.review ? `復習モード · ${q.category}` : q.category)),
         h('div', { class: 'mb-4 h-2 overflow-hidden rounded-full bg-line', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(total), 'aria-valuenow': String(state.i + (answered ? 1 : 0)) },
           h('div', { class: 'h-full bg-accent', style: `width:${((state.i + (answered ? 1 : 0)) / total) * 100}%` })),
         h('h2', { class: 'mb-4 text-lg font-semibold leading-snug' }, q.question),
@@ -182,7 +197,8 @@
     function showResult() {
       const total = state.list.length;
       const pct = Math.round((state.score / total) * 100);
-      const comment = pct === 100 ? '全問正解！完璧です。'
+      const comment = state.review && pct === 100 ? '復習完了！間違えた問題をすべて克服しました。'
+        : pct === 100 ? '全問正解！完璧です。'
         : pct >= 80 ? 'すばらしい！あと一歩で満点です。'
         : pct >= 50 ? 'いい調子です。間違えた問題を復習しましょう。'
         : 'まずは解説を読んで、もう一度挑戦してみましょう。';
@@ -198,12 +214,20 @@
 
       render(
         h('section', { class: 'rounded-2xl border border-line bg-surface p-6 text-center' },
-          h('p', { class: 'text-sm text-muted' }, 'スコア'),
+          h('p', { class: 'text-sm text-muted' }, state.review ? '復習の結果' : 'スコア'),
           h('p', { class: 'mt-1 text-5xl font-bold' }, `${state.score} / ${total}`),
           h('p', { class: 'mt-1 text-muted' }, `正答率 ${pct}%`),
+          state.review
+            ? h('p', { class: 'mt-1 text-xs text-muted' }, '間違えた問題だけの結果です。元のラウンドのスコアとは別です。')
+            : null,
           h('p', { class: 'mt-3 font-semibold' }, comment)),
         h('div', { class: 'mt-4 flex flex-wrap gap-3' },
-          h('button', { type: 'button', class: btnPrimary, onclick: () => startQuiz(state.key) }, '同じカテゴリでもう一度'),
+          state.wrong.length > 0
+            ? h('button', { type: 'button', class: btnPrimary, onclick: startReview },
+                `間違えた ${state.wrong.length} 問だけ復習`)
+            : null,
+          h('button', { type: 'button', class: state.wrong.length > 0 ? btnGhost : btnPrimary, onclick: () => startQuiz(state.key) },
+            '同じカテゴリでもう一度'),
           h('button', { type: 'button', class: btnGhost, onclick: showStart }, 'カテゴリ選択へ')),
         review
       );
